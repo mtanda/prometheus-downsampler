@@ -6,14 +6,17 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
+	"gopkg.in/yaml.v2"
 
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
@@ -86,14 +89,6 @@ type MetricsResponse struct {
 	Data   MetricsData
 }
 
-var ignoreCache = make(map[string]bool)
-
-func isIgnoreMetrics(metricName string) bool {
-	// TODO: read from config
-	ignoreCache[metricName] = false
-	return false
-}
-
 func getLabels(path string, label string, lr *LabelResponse) error {
 	resp, err := http.Get(path + "api/v1/label/" + label + "/values")
 	if err != nil {
@@ -130,11 +125,39 @@ func min(a, b int64) int64 {
 	return a
 }
 
+type Config struct {
+	IgnorePatterns []string `yaml:"ignorePatterns"`
+}
+
 type Downsampler struct {
-	promAddr string
-	dbPath   string
-	db       *tsdb.DB
-	logger   *log.Logger
+	promAddr    string
+	dbPath      string
+	db          *tsdb.DB
+	config      *Config
+	ignoreCache map[string]bool
+	logger      *log.Logger
+}
+
+func (d *Downsampler) isIgnoreMetrics(metricName string) bool {
+	if c, ok := d.ignoreCache[metricName]; ok {
+		return c
+	}
+
+	for _, p := range d.config.IgnorePatterns {
+		matched, err := regexp.Match(p, []byte(metricName))
+		if err != nil {
+			// ignore error
+			continue
+		}
+		if !d.ignoreCache[metricName] {
+			d.ignoreCache[metricName] = matched
+		}
+		if matched {
+			break
+		}
+	}
+
+	return d.ignoreCache[metricName]
 }
 
 func (d *Downsampler) downsample() error {
@@ -175,7 +198,7 @@ func (d *Downsampler) downsample() error {
 
 	for _, metricName := range lr.Data {
 		for _, aggregationType := range aggregationTypes {
-			if isIgnoreMetrics(metricName) {
+			if d.isIgnoreMetrics(metricName) {
 				continue
 			}
 
@@ -259,11 +282,32 @@ func (d *Downsampler) downsample() error {
 	return nil
 }
 
+func LoadConfig(configFile string) (*Config, error) {
+	var cfg Config
+	if len(configFile) == 0 {
+		return &cfg, nil
+	}
+
+	buf, err := ioutil.ReadFile(configFile)
+	if err != nil {
+		return nil, err
+	}
+
+	err = yaml.Unmarshal(buf, &cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
 func main() {
 	var promAddr string
 	var dbPath string
+	var configFile string
 	flag.StringVar(&promAddr, "prometheus.addr", "http://127.0.0.1:9090/", "Prometheus address to aggregate metrics")
 	flag.StringVar(&dbPath, "tsdb.path", "./data", "Prometheus TSDB data directory")
+	flag.StringVar(&configFile, "config.file", "", "Configuration file path.")
 	flag.Parse()
 
 	logLevel := promlog.AllowedLevel{}
@@ -273,7 +317,11 @@ func main() {
 	logCfg := promlog.Config{Level: &logLevel, Format: &format}
 	logger := promlog.New(&logCfg)
 
-	var err error
+	cfg, err := LoadConfig(configFile)
+	if err != nil {
+		level.Error(logger).Log("err", err)
+		panic(err)
+	}
 	dbPath, err = filepath.Abs(dbPath)
 	if err != nil {
 		level.Error(logger).Log("err", err)
@@ -303,6 +351,7 @@ func main() {
 				promAddr: promAddr,
 				dbPath:   dbPath,
 				db:       db,
+				config:   cfg,
 				logger:   &logger,
 			}
 			time.Sleep(60 * time.Second)
