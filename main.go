@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"math"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -131,10 +132,14 @@ type Config struct {
 
 type Downsampler struct {
 	promAddr    string
+	tmpDbPath   string
 	dbPath      string
 	db          *tsdb.DB
 	config      *Config
 	ignoreCache map[string]bool
+	mss         []*tsdb.MetricSample
+	minTime     int64
+	maxTime     int64
 	logger      *log.Logger
 }
 
@@ -158,6 +163,28 @@ func (d *Downsampler) isIgnoreMetrics(metricName string) bool {
 	}
 
 	return d.ignoreCache[metricName]
+}
+
+func (d *Downsampler) createBlock() (string, error) {
+	blockID, err := tsdb.CreateBlock(d.mss, d.tmpDbPath, d.minTime, d.maxTime, *d.logger)
+	if err != nil {
+		return "", err
+	}
+	bid := filepath.Base(blockID)
+	fromPath := d.tmpDbPath + "/" + bid
+	toPath := d.dbPath + "/" + bid
+	if err := os.Rename(fromPath, toPath+".tmp"); err != nil {
+		return "", err
+	}
+	if err := os.Rename(toPath+".tmp", toPath); err != nil {
+		return "", err
+	}
+	level.Info(*d.logger).Log("msg", "move block to data directory", "from", fromPath, "to", toPath)
+
+	d.minTime = math.MaxInt64
+	d.maxTime = math.MinInt64
+	d.mss = d.mss[:0]
+	return blockID, nil
 }
 
 func (d *Downsampler) downsample() error {
@@ -192,9 +219,8 @@ func (d *Downsampler) downsample() error {
 	progressTotal := len(lr.Data) * len(aggregationTypes)
 	sleepDuration := time.Duration(fetchDurationMilliseconds/progressTotal) * time.Millisecond
 	processed.WithLabelValues().Set(0)
-	var mss []*tsdb.MetricSample
-	var minTime int64 = math.MaxInt64
-	var maxTime int64 = math.MinInt64
+	d.minTime = math.MaxInt64
+	d.maxTime = math.MinInt64
 
 	for _, metricName := range lr.Data {
 		for _, aggregationType := range aggregationTypes {
@@ -240,25 +266,21 @@ func (d *Downsampler) downsample() error {
 				lb.Set(l.MetricName, metricName+"_"+aggregationType) // assume __name__ is not set
 
 				if len(allMetadata) == 0 || allMetadata[metricName][0].Type != v1.MetricTypeCounter {
-					mss = append(mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: float64(m.Value), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
+					d.mss = append(d.mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: float64(m.Value), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
 				} else {
-					mss = append(mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: float64(0), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
+					d.mss = append(d.mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: float64(0), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
 				}
-				minTime = min(minTime, (m.Timestamp.Unix()-downsampleInterval+1)*1000)
-				maxTime = max(maxTime, (m.Timestamp.Unix()-downsampleInterval+1)*1000)
-				mss = append(mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: float64(m.Value), TimestampMs: m.Timestamp.Unix() * 1000})
-				minTime = min(minTime, m.Timestamp.Unix()*1000)
-				maxTime = max(maxTime, m.Timestamp.Unix()*1000)
+				d.minTime = min(d.minTime, (m.Timestamp.Unix()-downsampleInterval+1)*1000)
+				d.maxTime = max(d.maxTime, (m.Timestamp.Unix()-downsampleInterval+1)*1000)
+				d.mss = append(d.mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: float64(m.Value), TimestampMs: m.Timestamp.Unix() * 1000})
+				d.minTime = min(d.minTime, m.Timestamp.Unix()*1000)
+				d.maxTime = max(d.maxTime, m.Timestamp.Unix()*1000)
 
-				if len(mss) == maxSamples {
-					blockID, err := tsdb.CreateBlock(mss, d.dbPath, minTime, maxTime, *d.logger)
+				if len(d.mss) == maxSamples {
+					blockID, err := d.createBlock()
 					if err != nil {
 						return err
 					}
-
-					minTime = math.MaxInt64
-					maxTime = math.MinInt64
-					mss = mss[:0]
 					level.Info(*d.logger).Log("msg", "create block successfully", "block", blockID)
 				}
 			}
@@ -270,8 +292,8 @@ func (d *Downsampler) downsample() error {
 		processed.WithLabelValues().Inc()
 	}
 
-	if len(mss) > 0 {
-		blockID, err := tsdb.CreateBlock(mss, d.dbPath, minTime, maxTime, *d.logger)
+	if len(d.mss) > 0 {
+		blockID, err := d.createBlock()
 		if err != nil {
 			return err
 		}
@@ -303,9 +325,11 @@ func LoadConfig(configFile string) (*Config, error) {
 
 func main() {
 	var promAddr string
+	var tmpDbPath string
 	var dbPath string
 	var configFile string
 	flag.StringVar(&promAddr, "prometheus.addr", "http://127.0.0.1:9090/", "Prometheus address to aggregate metrics")
+	flag.StringVar(&tmpDbPath, "tsdb.tmp-path", "./data.tmp", "Prometheus TSDB temporary data directory")
 	flag.StringVar(&dbPath, "tsdb.path", "./data", "Prometheus TSDB data directory")
 	flag.StringVar(&configFile, "config.file", "", "Configuration file path.")
 	flag.Parse()
@@ -322,8 +346,18 @@ func main() {
 		level.Error(logger).Log("err", err)
 		panic(err)
 	}
+	tmpDbPath, err = filepath.Abs(tmpDbPath)
+	if err != nil {
+		level.Error(logger).Log("err", err)
+		panic(err)
+	}
 	dbPath, err = filepath.Abs(dbPath)
 	if err != nil {
+		level.Error(logger).Log("err", err)
+		panic(err)
+	}
+	err = os.Mkdir(dbPath, 0755)
+	if err != nil && !os.IsExist(err) {
 		level.Error(logger).Log("err", err)
 		panic(err)
 	}
@@ -332,7 +366,7 @@ func main() {
 		WALSegmentSize: wal.DefaultSegmentSize,
 		NoLockfile:     true,
 	}
-	db, err := tsdb.Open(dbPath, logger, prometheus.DefaultRegisterer, opts)
+	db, err := tsdb.Open(tmpDbPath, logger, prometheus.DefaultRegisterer, opts)
 	if err != nil {
 		level.Error(logger).Log("err", err)
 		panic(err)
@@ -348,11 +382,12 @@ func main() {
 			t.Reset(timerInterval)
 
 			d := Downsampler{
-				promAddr: promAddr,
-				dbPath:   dbPath,
-				db:       db,
-				config:   cfg,
-				logger:   &logger,
+				promAddr:  promAddr,
+				tmpDbPath: tmpDbPath,
+				dbPath:    dbPath,
+				db:        db,
+				config:    cfg,
+				logger:    &logger,
 			}
 			time.Sleep(60 * time.Second)
 			level.Info(logger).Log("msg", "downsample start")
