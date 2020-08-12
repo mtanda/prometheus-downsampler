@@ -25,6 +25,7 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/promlog"
 	l "github.com/prometheus/prometheus/pkg/labels"
+	v "github.com/prometheus/prometheus/pkg/value"
 	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/tsdb/wal"
 )
@@ -275,6 +276,9 @@ func (d *Downsampler) downsample() error {
 				d.mss = append(d.mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: float64(m.Value), TimestampMs: m.Timestamp.Unix() * 1000})
 				d.minTime = min(d.minTime, m.Timestamp.Unix()*1000)
 				d.maxTime = max(d.maxTime, m.Timestamp.Unix()*1000)
+				d.mss = append(d.mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: math.Float64frombits(v.StaleNaN), TimestampMs: (m.Timestamp.Unix() + 1) * 1000})
+				d.minTime = min(d.minTime, (m.Timestamp.Unix()+1)*1000)
+				d.maxTime = max(d.maxTime, (m.Timestamp.Unix()+1)*1000)
 
 				if len(d.mss) == maxSamples {
 					blockID, err := d.createBlock()
