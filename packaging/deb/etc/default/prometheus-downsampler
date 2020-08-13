@@ -1,0 +1,1 @@
+ARGS="--tsdb.tmp-path=/var/tmp/prometheus-downsampler/data.tmp --tsdb.path=/var/tmp/prometheus-downsampler/data"

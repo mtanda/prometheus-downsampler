@@ -1,0 +1,17 @@
+[Unit]
+Description=Prometheus Downsampler
+After=network.target
+
+[Service]
+User=nobody
+Group=nogroup
+Type=simple
+Restart=always
+RestartSec=30
+EnvironmentFile=/etc/default/prometheus-downsampler
+ExecStart=/usr/local/bin/prometheus-downsampler $ARGS
+WorkingDirectory=/var/tmp/prometheus-downsampler
+TimeoutStopSec=20s
+
+[Install]
+WantedBy=multi-user.target
