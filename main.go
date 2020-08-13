@@ -22,6 +22,7 @@ import (
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/promlog"
 	l "github.com/prometheus/prometheus/pkg/labels"
@@ -329,11 +330,13 @@ func LoadConfig(configFile string) (*Config, error) {
 
 func main() {
 	var promAddr string
+	var listenAddr string
 	var tmpDbPath string
 	var dbPath string
 	var configFile string
 	var maxSamples int
 	flag.StringVar(&promAddr, "prometheus.addr", "http://127.0.0.1:9090/", "Prometheus address to aggregate metrics")
+	flag.StringVar(&listenAddr, "web.listen-address", ":19200", "Address on which to expose metrics")
 	flag.StringVar(&tmpDbPath, "tsdb.tmp-path", "./data.tmp", "Prometheus TSDB temporary data directory")
 	flag.StringVar(&dbPath, "tsdb.path", "./data", "Prometheus TSDB data directory")
 	flag.StringVar(&configFile, "config.file", "", "Configuration file path.")
@@ -378,6 +381,20 @@ func main() {
 		panic(err)
 	}
 	defer db.Close()
+
+	go func() {
+		prometheus.MustRegister(lastSuccess)
+		prometheus.MustRegister(processed)
+		prometheus.MustRegister(retryTotal)
+		prometheus.MustRegister(failureTotal)
+		http.Handle("/metrics", promhttp.Handler())
+		level.Info(logger).Log("msg", "Listening on "+listenAddr)
+		err = http.ListenAndServe(listenAddr, nil)
+		if err != nil {
+			level.Error(logger).Log("err", err)
+			panic(err)
+		}
+	}()
 
 	now := time.Now()
 	t := time.NewTimer(timerInterval - (now.Sub(now.Truncate(timerInterval))))
