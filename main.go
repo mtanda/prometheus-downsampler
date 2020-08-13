@@ -34,7 +34,6 @@ const (
 	downsampleInterval        = 60 * 60 // 1 hour
 	timerInterval             = downsampleInterval * time.Second
 	fetchDurationMilliseconds = downsampleInterval / 2 * 1000
-	maxSamples                = 100
 	maxRetryCount             = 7
 	enableSleep               = true
 )
@@ -137,6 +136,7 @@ type Downsampler struct {
 	dbPath      string
 	db          *tsdb.DB
 	config      *Config
+	maxSamples  int
 	ignoreCache map[string]bool
 	mss         []*tsdb.MetricSample
 	minTime     int64
@@ -280,7 +280,7 @@ func (d *Downsampler) downsample() error {
 				d.minTime = min(d.minTime, (m.Timestamp.Unix()+1)*1000)
 				d.maxTime = max(d.maxTime, (m.Timestamp.Unix()+1)*1000)
 
-				if len(d.mss) == maxSamples {
+				if len(d.mss) == d.maxSamples {
 					blockID, err := d.createBlock()
 					if err != nil {
 						return err
@@ -332,10 +332,12 @@ func main() {
 	var tmpDbPath string
 	var dbPath string
 	var configFile string
+	var maxSamples int
 	flag.StringVar(&promAddr, "prometheus.addr", "http://127.0.0.1:9090/", "Prometheus address to aggregate metrics")
 	flag.StringVar(&tmpDbPath, "tsdb.tmp-path", "./data.tmp", "Prometheus TSDB temporary data directory")
 	flag.StringVar(&dbPath, "tsdb.path", "./data", "Prometheus TSDB data directory")
 	flag.StringVar(&configFile, "config.file", "", "Configuration file path.")
+	flag.IntVar(&maxSamples, "max-samples", 10000000, "Maximum number of samples")
 	flag.Parse()
 
 	logLevel := promlog.AllowedLevel{}
@@ -386,12 +388,13 @@ func main() {
 			t.Reset(timerInterval)
 
 			d := Downsampler{
-				promAddr:  promAddr,
-				tmpDbPath: tmpDbPath,
-				dbPath:    dbPath,
-				db:        db,
-				config:    cfg,
-				logger:    &logger,
+				promAddr:   promAddr,
+				tmpDbPath:  tmpDbPath,
+				dbPath:     dbPath,
+				db:         db,
+				config:     cfg,
+				maxSamples: maxSamples,
+				logger:     &logger,
 			}
 			time.Sleep(60 * time.Second)
 			level.Info(logger).Log("msg", "downsample start")
