@@ -197,7 +197,7 @@ func (d *Downsampler) createBlock() (string, error) {
 
 func (d *Downsampler) downsample() error {
 	ctx := context.Background()
-	aggregationTypes := []string{"avg", "max"}
+	downsampleTypes := []string{"avg", "max"}
 	now := time.Now().UTC()
 	downsampleBaseTimestamp := now.Truncate(timerInterval)
 	var retryCount int
@@ -224,18 +224,18 @@ func (d *Downsampler) downsample() error {
 	}
 	promAPI := v1.NewAPI(client)
 
-	progressTotal := len(lr.Data) * len(aggregationTypes)
+	progressTotal := len(lr.Data) * len(downsampleTypes)
 	sleepDuration := time.Duration(fetchDurationMilliseconds/progressTotal) * time.Millisecond
 	processed.WithLabelValues().Set(0)
 	d.minTime = math.MaxInt64
 	d.maxTime = math.MinInt64
 
-	aggregationLabel := "__meta_downsampler_aggregation_type"
+	downsampleLabel := "__meta_downsampler_downsample_type"
 	relabelConfig := d.config.RelabelConfig
-	relabelConfig = append(relabelConfig, &relabel.Config{Regex: relabel.MustNewRegexp("^" + aggregationLabel + "$"), Action: "labeldrop"})
+	relabelConfig = append(relabelConfig, &relabel.Config{Regex: relabel.MustNewRegexp("^" + downsampleLabel + "$"), Action: "labeldrop"})
 
 	for _, metricName := range lr.Data {
-		for _, aggregationType := range aggregationTypes {
+		for _, downsampleType := range downsampleTypes {
 			if d.isIgnoreMetrics(metricName) {
 				continue
 			}
@@ -251,7 +251,7 @@ func (d *Downsampler) downsample() error {
 					continue
 				}
 				if len(allMetadata) == 0 || allMetadata[metricName][0].Type != v1.MetricTypeCounter {
-					query = aggregationType + "_over_time({__name__=\"" + metricName + "\"}[" + downsampleDuration + "])"
+					query = downsampleType + "_over_time({__name__=\"" + metricName + "\"}[" + downsampleDuration + "])"
 				} else {
 					query = "increase({__name__=\"" + metricName + "\"}[" + downsampleDuration + "])"
 				}
@@ -276,7 +276,7 @@ func (d *Downsampler) downsample() error {
 					lb.Set(string(n), string(v))
 				}
 				lb.Set(l.MetricName, metricName)
-				lb.Set(aggregationLabel, aggregationType)
+				lb.Set(downsampleLabel, downsampleType)
 				ls := relabel.Process(lb.Labels(), relabelConfig...)
 
 				if len(allMetadata) == 0 || allMetadata[metricName][0].Type != v1.MetricTypeCounter {
