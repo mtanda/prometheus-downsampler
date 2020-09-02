@@ -1,0 +1,8 @@
+downsample_config:
+  ignore_patterns:
+    - foo
+relabel_config:
+  - source_labels: [__meta_downsampler_downsample_type]
+    target_label: downsample_type
+    regex: (.*)
+    replacement: ${1}
