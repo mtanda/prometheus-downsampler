@@ -26,6 +26,7 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/promlog"
 	l "github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/pkg/relabel"
 	v "github.com/prometheus/prometheus/pkg/value"
 	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/tsdb/wal"
@@ -127,8 +128,13 @@ func min(a, b int64) int64 {
 	return a
 }
 
+type DownsampleConfig struct {
+	IgnorePatterns []string `yaml:"ignore_patterns"`
+}
+
 type Config struct {
-	IgnorePatterns []string `yaml:"ignorePatterns"`
+	DownsampleConfig DownsampleConfig  `yaml:"downsample_config"`
+	RelabelConfig    []*relabel.Config `yaml:"relabel_config"`
 }
 
 type Downsampler struct {
@@ -150,7 +156,7 @@ func (d *Downsampler) isIgnoreMetrics(metricName string) bool {
 		return c
 	}
 
-	for _, p := range d.config.IgnorePatterns {
+	for _, p := range d.config.DownsampleConfig.IgnorePatterns {
 		matched, err := regexp.Match(p, []byte(metricName))
 		if err != nil {
 			// ignore error
@@ -224,6 +230,10 @@ func (d *Downsampler) downsample() error {
 	d.minTime = math.MaxInt64
 	d.maxTime = math.MinInt64
 
+	aggregationLabel := "__meta_downsampler_aggregation_type"
+	relabelConfig := d.config.RelabelConfig
+	relabelConfig = append(relabelConfig, &relabel.Config{Regex: relabel.MustNewRegexp("^" + aggregationLabel + "$"), Action: "labeldrop"})
+
 	for _, metricName := range lr.Data {
 		for _, aggregationType := range aggregationTypes {
 			if d.isIgnoreMetrics(metricName) {
@@ -265,19 +275,21 @@ func (d *Downsampler) downsample() error {
 				for n, v := range m.Metric {
 					lb.Set(string(n), string(v))
 				}
-				lb.Set(l.MetricName, metricName+"_"+aggregationType) // assume __name__ is not set
+				lb.Set(l.MetricName, metricName)
+				lb.Set(aggregationLabel, aggregationType)
+				ls := relabel.Process(lb.Labels(), relabelConfig...)
 
 				if len(allMetadata) == 0 || allMetadata[metricName][0].Type != v1.MetricTypeCounter {
-					d.mss = append(d.mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: float64(m.Value), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
+					d.mss = append(d.mss, &tsdb.MetricSample{Labels: ls, Value: float64(m.Value), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
 				} else {
-					d.mss = append(d.mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: float64(0), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
+					d.mss = append(d.mss, &tsdb.MetricSample{Labels: ls, Value: float64(0), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
 				}
 				d.minTime = min(d.minTime, (m.Timestamp.Unix()-downsampleInterval+1)*1000)
 				d.maxTime = max(d.maxTime, (m.Timestamp.Unix()-downsampleInterval+1)*1000)
-				d.mss = append(d.mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: float64(m.Value), TimestampMs: m.Timestamp.Unix() * 1000})
+				d.mss = append(d.mss, &tsdb.MetricSample{Labels: ls, Value: float64(m.Value), TimestampMs: m.Timestamp.Unix() * 1000})
 				d.minTime = min(d.minTime, m.Timestamp.Unix()*1000)
 				d.maxTime = max(d.maxTime, m.Timestamp.Unix()*1000)
-				d.mss = append(d.mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: math.Float64frombits(v.StaleNaN), TimestampMs: (m.Timestamp.Unix() + 1) * 1000})
+				d.mss = append(d.mss, &tsdb.MetricSample{Labels: ls, Value: math.Float64frombits(v.StaleNaN), TimestampMs: (m.Timestamp.Unix() + 1) * 1000})
 				d.minTime = min(d.minTime, (m.Timestamp.Unix()+1)*1000)
 				d.maxTime = max(d.maxTime, (m.Timestamp.Unix()+1)*1000)
 
