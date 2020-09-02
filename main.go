@@ -405,13 +405,14 @@ func main() {
 			t.Reset(timerInterval)
 
 			d := Downsampler{
-				promAddr:   promAddr,
-				tmpDbPath:  tmpDbPath,
-				dbPath:     dbPath,
-				db:         db,
-				config:     cfg,
-				maxSamples: maxSamples,
-				logger:     &logger,
+				promAddr:    promAddr,
+				tmpDbPath:   tmpDbPath,
+				dbPath:      dbPath,
+				db:          db,
+				config:      cfg,
+				maxSamples:  maxSamples,
+				ignoreCache: make(map[string]bool),
+				logger:      &logger,
 			}
 			time.Sleep(60 * time.Second)
 			level.Info(logger).Log("msg", "downsample start")
