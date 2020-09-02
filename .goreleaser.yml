@@ -44,5 +44,3 @@ changelog:
     - '^test:'
     - '^cut:'
     - '^typo'
-release:
-  disable: true
