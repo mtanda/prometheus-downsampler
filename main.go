@@ -26,6 +26,7 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/promlog"
 	l "github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/pkg/relabel"
 	v "github.com/prometheus/prometheus/pkg/value"
 	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/tsdb/wal"
@@ -127,8 +128,14 @@ func min(a, b int64) int64 {
 	return a
 }
 
+type DownsampleConfig struct {
+	DownsampleTypes []string `yaml:"downsample_types"`
+	IgnorePatterns  []string `yaml:"ignore_patterns"`
+}
+
 type Config struct {
-	IgnorePatterns []string `yaml:"ignorePatterns"`
+	DownsampleConfig DownsampleConfig  `yaml:"downsample_config"`
+	RelabelConfig    []*relabel.Config `yaml:"relabel_config"`
 }
 
 type Downsampler struct {
@@ -150,7 +157,7 @@ func (d *Downsampler) isIgnoreMetrics(metricName string) bool {
 		return c
 	}
 
-	for _, p := range d.config.IgnorePatterns {
+	for _, p := range d.config.DownsampleConfig.IgnorePatterns {
 		matched, err := regexp.Match(p, []byte(metricName))
 		if err != nil {
 			// ignore error
@@ -191,7 +198,10 @@ func (d *Downsampler) createBlock() (string, error) {
 
 func (d *Downsampler) downsample() error {
 	ctx := context.Background()
-	aggregationTypes := []string{"avg", "max"}
+	downsampleTypes := d.config.DownsampleConfig.DownsampleTypes
+	if len(downsampleTypes) == 0 {
+		downsampleTypes = []string{"avg", "max"}
+	}
 	now := time.Now().UTC()
 	downsampleBaseTimestamp := now.Truncate(timerInterval)
 	var retryCount int
@@ -218,14 +228,18 @@ func (d *Downsampler) downsample() error {
 	}
 	promAPI := v1.NewAPI(client)
 
-	progressTotal := len(lr.Data) * len(aggregationTypes)
+	progressTotal := len(lr.Data) * len(downsampleTypes)
 	sleepDuration := time.Duration(fetchDurationMilliseconds/progressTotal) * time.Millisecond
 	processed.WithLabelValues().Set(0)
 	d.minTime = math.MaxInt64
 	d.maxTime = math.MinInt64
 
+	downsampleLabel := "__meta_downsampler_downsample_type"
+	relabelConfig := d.config.RelabelConfig
+	relabelConfig = append(relabelConfig, &relabel.Config{Regex: relabel.MustNewRegexp("^" + downsampleLabel + "$"), Action: "labeldrop"})
+
 	for _, metricName := range lr.Data {
-		for _, aggregationType := range aggregationTypes {
+		for _, downsampleType := range downsampleTypes {
 			if d.isIgnoreMetrics(metricName) {
 				continue
 			}
@@ -241,7 +255,7 @@ func (d *Downsampler) downsample() error {
 					continue
 				}
 				if len(allMetadata) == 0 || allMetadata[metricName][0].Type != v1.MetricTypeCounter {
-					query = aggregationType + "_over_time({__name__=\"" + metricName + "\"}[" + downsampleDuration + "])"
+					query = downsampleType + "_over_time({__name__=\"" + metricName + "\"}[" + downsampleDuration + "])"
 				} else {
 					query = "increase({__name__=\"" + metricName + "\"}[" + downsampleDuration + "])"
 				}
@@ -265,19 +279,21 @@ func (d *Downsampler) downsample() error {
 				for n, v := range m.Metric {
 					lb.Set(string(n), string(v))
 				}
-				lb.Set(l.MetricName, metricName+"_"+aggregationType) // assume __name__ is not set
+				lb.Set(l.MetricName, metricName)
+				lb.Set(downsampleLabel, downsampleType)
+				ls := relabel.Process(lb.Labels(), relabelConfig...)
 
 				if len(allMetadata) == 0 || allMetadata[metricName][0].Type != v1.MetricTypeCounter {
-					d.mss = append(d.mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: float64(m.Value), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
+					d.mss = append(d.mss, &tsdb.MetricSample{Labels: ls, Value: float64(m.Value), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
 				} else {
-					d.mss = append(d.mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: float64(0), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
+					d.mss = append(d.mss, &tsdb.MetricSample{Labels: ls, Value: float64(0), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
 				}
 				d.minTime = min(d.minTime, (m.Timestamp.Unix()-downsampleInterval+1)*1000)
 				d.maxTime = max(d.maxTime, (m.Timestamp.Unix()-downsampleInterval+1)*1000)
-				d.mss = append(d.mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: float64(m.Value), TimestampMs: m.Timestamp.Unix() * 1000})
+				d.mss = append(d.mss, &tsdb.MetricSample{Labels: ls, Value: float64(m.Value), TimestampMs: m.Timestamp.Unix() * 1000})
 				d.minTime = min(d.minTime, m.Timestamp.Unix()*1000)
 				d.maxTime = max(d.maxTime, m.Timestamp.Unix()*1000)
-				d.mss = append(d.mss, &tsdb.MetricSample{Labels: lb.Labels(), Value: math.Float64frombits(v.StaleNaN), TimestampMs: (m.Timestamp.Unix() + 1) * 1000})
+				d.mss = append(d.mss, &tsdb.MetricSample{Labels: ls, Value: math.Float64frombits(v.StaleNaN), TimestampMs: (m.Timestamp.Unix() + 1) * 1000})
 				d.minTime = min(d.minTime, (m.Timestamp.Unix()+1)*1000)
 				d.maxTime = max(d.maxTime, (m.Timestamp.Unix()+1)*1000)
 
@@ -405,13 +421,14 @@ func main() {
 			t.Reset(timerInterval)
 
 			d := Downsampler{
-				promAddr:   promAddr,
-				tmpDbPath:  tmpDbPath,
-				dbPath:     dbPath,
-				db:         db,
-				config:     cfg,
-				maxSamples: maxSamples,
-				logger:     &logger,
+				promAddr:    promAddr,
+				tmpDbPath:   tmpDbPath,
+				dbPath:      dbPath,
+				db:          db,
+				config:      cfg,
+				maxSamples:  maxSamples,
+				ignoreCache: make(map[string]bool),
+				logger:      &logger,
 			}
 			time.Sleep(60 * time.Second)
 			level.Info(logger).Log("msg", "downsample start")
