@@ -1,4 +1,8 @@
 downsample_config:
+  downsample_types:
+    - avg
+    - max
+    - min
   ignore_patterns:
     - foo
 relabel_config:

@@ -129,7 +129,8 @@ func min(a, b int64) int64 {
 }
 
 type DownsampleConfig struct {
-	IgnorePatterns []string `yaml:"ignore_patterns"`
+	DownsampleTypes []string `yaml:"downsample_types"`
+	IgnorePatterns  []string `yaml:"ignore_patterns"`
 }
 
 type Config struct {
@@ -197,7 +198,10 @@ func (d *Downsampler) createBlock() (string, error) {
 
 func (d *Downsampler) downsample() error {
 	ctx := context.Background()
-	downsampleTypes := []string{"avg", "max"}
+	downsampleTypes := d.config.DownsampleConfig.DownsampleTypes
+	if len(downsampleTypes) == 0 {
+		downsampleTypes = []string{"avg", "max"}
+	}
 	now := time.Now().UTC()
 	downsampleBaseTimestamp := now.Truncate(timerInterval)
 	var retryCount int
