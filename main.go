@@ -257,7 +257,11 @@ func (d *Downsampler) downsample() error {
 				if len(allMetadata) == 0 || allMetadata[metricName][0].Type != v1.MetricTypeCounter {
 					query = downsampleType + "_over_time({__name__=\"" + metricName + "\"}[" + downsampleDuration + "])"
 				} else {
-					query = "increase({__name__=\"" + metricName + "\"}[" + downsampleDuration + "])"
+					if downsampleType != "max" {
+						query = "increase({__name__=\"" + metricName + "\"}[" + downsampleDuration + "])"
+					} else {
+						query = "max_over_time(rate({__name__=\"" + metricName + "\"}[30s])[" + downsampleDuration + ":15s])"
+					}
 				}
 				value, warn, err = promAPI.Query(ctx, query, downsampleBaseTimestamp)
 				if warn == nil && err == nil {
@@ -283,7 +287,7 @@ func (d *Downsampler) downsample() error {
 				lb.Set(downsampleLabel, downsampleType)
 				ls := relabel.Process(lb.Labels(), relabelConfig...)
 
-				if len(allMetadata) == 0 || allMetadata[metricName][0].Type != v1.MetricTypeCounter {
+				if len(allMetadata) == 0 || allMetadata[metricName][0].Type != v1.MetricTypeCounter || downsampleType == "max" {
 					d.mss = append(d.mss, &tsdb.MetricSample{Labels: ls, Value: float64(m.Value), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
 				} else {
 					d.mss = append(d.mss, &tsdb.MetricSample{Labels: ls, Value: float64(0), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
