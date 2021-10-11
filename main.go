@@ -254,13 +254,19 @@ func (d *Downsampler) downsample() error {
 					level.Error(*d.logger).Log("error", err)
 					continue
 				}
-				if len(allMetadata) == 0 || allMetadata[metricName][0].Type != v1.MetricTypeCounter {
+				if len(allMetadata) == 0 || (allMetadata[metricName][0].Type != v1.MetricTypeCounter && allMetadata[metricName][0].Type != v1.MetricTypeUnknown) {
 					query = downsampleType + "_over_time({__name__=\"" + metricName + "\"}[" + downsampleDuration + "])"
-				} else {
+				} else if allMetadata[metricName][0].Type == v1.MetricTypeCounter {
 					if downsampleType != "max" {
 						query = "increase({__name__=\"" + metricName + "\"}[" + downsampleDuration + "])"
 					} else {
 						query = "max_over_time(rate({__name__=\"" + metricName + "\"}[30s])[" + downsampleDuration + ":15s])"
+					}
+				} else if allMetadata[metricName][0].Type == v1.MetricTypeUnknown {
+					if downsampleType != "max" {
+						query = "last_over_time({__name__=\"" + metricName + "\"}[" + downsampleDuration + "])"
+					} else {
+						query = "max_over_time({__name__=\"" + metricName + "\"}[" + downsampleDuration + "])"
 					}
 				}
 				value, warn, err = promAPI.Query(ctx, query, downsampleBaseTimestamp)
