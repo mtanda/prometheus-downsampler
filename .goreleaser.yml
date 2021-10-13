@@ -26,12 +26,14 @@ nfpms:
     formats:
       - deb
       - rpm
-    files:
-      "packaging/deb/systemd/**": "/usr/lib/systemd/system"
-    config_files:
-      "packaging/deb/etc/default/prometheus-downsampler": "/etc/default/prometheus-downsampler"
     empty_folders:
       - /var/tmp/prometheus-downsampler
+    contents:
+      - src: "packaging/deb/etc/default/prometheus-downsampler"
+        dst: "/etc/default/prometheus-downsampler"
+        type: config
+      - src: "packaging/deb/systemd"
+        dst: "/usr/lib/systemd/system"
     scripts:
       postinstall: "packaging/scripts/postinstall.sh"
       postremove: "packaging/scripts/postremove.sh"
