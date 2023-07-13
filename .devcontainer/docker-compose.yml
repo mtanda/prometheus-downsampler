@@ -14,6 +14,7 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
     volumes:
       - ./prometheus/:/etc/prometheus/
       - prometheus_data:/prometheus
@@ -30,6 +31,7 @@ services:
     volumes:
       - ..:/workspace:cached
       - gohome:/home/vscode/go:cached
+      - prometheus_data:/prometheus
     networks:
       - promapi
     user: vscode
