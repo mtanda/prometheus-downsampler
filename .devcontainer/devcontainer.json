@@ -1,0 +1,20 @@
+{
+	"name": "prometheus-downsampler",
+	"dockerComposeFile": [
+		"./docker-compose.yml"
+	],
+	"service": "prometheus-downsampler",
+	"runServices": [
+		"prometheus"
+	],
+	"workspaceFolder": "/workspace",
+	"remoteUser": "vscode",
+	"postAttachCommand": ".devcontainer/postAttach.sh",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"golang.Go"
+			]
+		}
+	}
+}
