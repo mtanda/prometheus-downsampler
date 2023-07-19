@@ -13,3 +13,9 @@ curl -X PUT 'http://prometheus:9090/-/quit' && echo
 while [ `curl 'http://prometheus:9090/-/ready' -s -o /dev/null -w '%{http_code}\n'` != 200 ]; do
   sleep 1
 done
+
+sudo sudo -u nobody rm -rf /prometheus_downsample/*
+curl -X PUT 'http://prometheus_downsample:9090/-/quit' && echo
+while [ `curl 'http://prometheus_downsample:9090/-/ready' -s -o /dev/null -w '%{http_code}\n'` != 200 ]; do
+  sleep 1
+done
