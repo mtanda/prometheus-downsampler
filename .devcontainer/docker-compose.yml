@@ -2,6 +2,7 @@ version: "3.8"
 
 volumes:
   prometheus_data: {}
+  prometheus_downsample_data: {}
   gohome: {}
 
 networks:
@@ -24,6 +25,21 @@ services:
       - promapi
     restart: always
 
+  prometheus_downsample:
+    image: prom/prometheus:v2.45.0
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus_downsample/:/etc/prometheus/
+      - prometheus_downsample_data:/prometheus
+    ports:
+      - 19090:9090
+    networks:
+      - promapi
+    restart: always
+
   prometheus-downsampler:
     build:
       context: ./prometheus-downsampler
@@ -32,6 +48,7 @@ services:
       - ..:/workspace:cached
       - gohome:/home/vscode/go:cached
       - prometheus_data:/prometheus
+      - prometheus_downsample_data:/prometheus_downsample
     networks:
       - promapi
     user: vscode

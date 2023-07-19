@@ -5,7 +5,8 @@
 	],
 	"service": "prometheus-downsampler",
 	"runServices": [
-		"prometheus"
+		"prometheus",
+		"prometheus_downsample"
 	],
 	"workspaceFolder": "/workspace",
 	"remoteUser": "vscode",
