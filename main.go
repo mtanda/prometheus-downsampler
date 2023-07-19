@@ -37,7 +37,6 @@ const (
 	timerInterval             = downsampleInterval * time.Second
 	fetchDurationMilliseconds = downsampleInterval / 2 * 1000
 	maxRetryCount             = 7
-	enableSleep               = true
 )
 
 var (
@@ -150,6 +149,7 @@ type Downsampler struct {
 	minTime     int64
 	maxTime     int64
 	logger      *log.Logger
+	enableSleep bool
 }
 
 func (d *Downsampler) isIgnoreMetrics(metricName string) bool {
@@ -316,7 +316,7 @@ func (d *Downsampler) downsample() error {
 				}
 			}
 
-			if enableSleep {
+			if d.enableSleep {
 				time.Sleep(sleepDuration)
 			}
 		}
@@ -439,6 +439,7 @@ func main() {
 				maxSamples:  maxSamples,
 				ignoreCache: make(map[string]bool),
 				logger:      &logger,
+				enableSleep: true,
 			}
 			time.Sleep(60 * time.Second)
 			level.Info(logger).Log("msg", "downsample start")
