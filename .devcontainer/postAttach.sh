@@ -10,3 +10,5 @@ go install honnef.co/go/tools/cmd/staticcheck@latest
 go install github.com/go-delve/delve/cmd/dlv@latest
 
 go mod download
+
+sudo chmod 2777 /prometheus /prometheus_downsample
