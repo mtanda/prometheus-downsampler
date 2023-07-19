@@ -34,10 +34,10 @@ type Datapoint struct {
 func genGaugeData(now time.Time) []Datapoint {
 	tp := now.Truncate(truncateRange).Add(-backfillRange).Unix()
 	data := make([]Datapoint, 0)
-	for n := 0; n < int(backfillRange.Seconds()/scrapeInterval.Seconds()); n++ {
+	for n := 0; n < int(backfillRange.Seconds()/scrapeInterval.Seconds())+1; n++ {
 		data = append(data, Datapoint{
 			Timestamp: tp + int64(n*int(scrapeInterval.Seconds())),
-			Value:     float64(n),
+			Value:     float64(2 * n),
 		})
 	}
 	return data
@@ -46,10 +46,10 @@ func genGaugeData(now time.Time) []Datapoint {
 func genCounterData(now time.Time) []Datapoint {
 	tp := now.Truncate(truncateRange).Add(-backfillRange).Unix()
 	data := make([]Datapoint, 0)
-	for n := 0; n < int(backfillRange.Seconds()/scrapeInterval.Seconds()); n++ {
+	for n := 0; n < int(backfillRange.Seconds()/scrapeInterval.Seconds())+1; n++ {
 		data = append(data, Datapoint{
 			Timestamp: tp + int64(n*int(scrapeInterval.Seconds())),
-			Value:     float64(n),
+			Value:     float64(2 * n),
 		})
 	}
 	return data
