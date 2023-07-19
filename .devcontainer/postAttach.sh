@@ -2,7 +2,7 @@
 
 cd `dirname $0`
 cd ..
-sudo chown -R vscode .
+sudo chown -R vscode . /home/vscode/go
 
 # install go development kit
 go install golang.org/x/tools/gopls@latest
