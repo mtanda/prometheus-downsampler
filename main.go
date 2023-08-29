@@ -422,32 +422,21 @@ func main() {
 		}
 	}()
 
-	now := time.Now()
-	t := time.NewTimer(timerInterval - (now.Sub(now.Truncate(timerInterval))))
-	defer t.Stop()
-	for {
-		select {
-		case <-t.C:
-			t.Reset(timerInterval)
-
-			d := Downsampler{
-				promAddr:    promAddr,
-				tmpDbPath:   tmpDbPath,
-				dbPath:      dbPath,
-				db:          db,
-				config:      cfg,
-				maxSamples:  maxSamples,
-				ignoreCache: make(map[string]bool),
-				logger:      &logger,
-				enableSleep: true,
-			}
-			time.Sleep(60 * time.Second)
-			level.Info(logger).Log("msg", "downsample start")
-			if err := d.downsample(); err != nil {
-				level.Error(logger).Log("err", err)
-				panic(err)
-			}
-			level.Info(logger).Log("msg", "downsample done")
-		}
+	d := Downsampler{
+		promAddr:    promAddr,
+		tmpDbPath:   tmpDbPath,
+		dbPath:      dbPath,
+		db:          db,
+		config:      cfg,
+		maxSamples:  maxSamples,
+		ignoreCache: make(map[string]bool),
+		logger:      &logger,
+		enableSleep: true,
 	}
+	level.Info(logger).Log("msg", "downsample start")
+	if err := d.downsample(); err != nil {
+		level.Error(logger).Log("err", err)
+		panic(err)
+	}
+	level.Info(logger).Log("msg", "downsample done")
 }
