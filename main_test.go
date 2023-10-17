@@ -56,6 +56,8 @@ func Test_downsample(t *testing.T) {
 	}
 	downsampleAPI := v1.NewAPI(downsampleClient)
 	ctx := context.TODO()
+
+	// gauge
 	value, _, err := downsampleAPI.Query(ctx, "test_gauge", time.Now().Truncate(1*time.Hour))
 	if err != nil {
 		t.Fatalf("prometheus query error")
@@ -64,6 +66,17 @@ func Test_downsample(t *testing.T) {
 	expected := model.SampleValue(180)
 	if actual != expected {
 		t.Errorf("gauge downsampled value = %v, want %v", actual, expected)
+	}
+
+	// counter
+	value, _, err = downsampleAPI.Query(ctx, "test_counter_seconds_total", time.Now().Truncate(1*time.Hour))
+	if err != nil {
+		t.Fatalf("prometheus query error")
+	}
+	actual = value.(model.Vector)[0].Value
+	expected = model.SampleValue(180)
+	if actual != expected {
+		t.Errorf("counter downsampled value = %v, want %v", actual, expected)
 	}
 }
 
