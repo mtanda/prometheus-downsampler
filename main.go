@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-kit/kit/log"
@@ -22,7 +23,7 @@ import (
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/promlog"
 	l "github.com/prometheus/prometheus/pkg/labels"
@@ -132,9 +133,14 @@ type DownsampleConfig struct {
 	IgnorePatterns  []string `yaml:"ignore_patterns"`
 }
 
+type SelfMetricsConfig struct {
+	TextfileCollectorOutput string `yaml:"textfile_collector_output"`
+}
+
 type Config struct {
-	DownsampleConfig DownsampleConfig  `yaml:"downsample_config"`
-	RelabelConfig    []*relabel.Config `yaml:"relabel_config"`
+	DownsampleConfig  DownsampleConfig  `yaml:"downsample_config"`
+	RelabelConfig     []*relabel.Config `yaml:"relabel_config"`
+	SelfMetricsConfig SelfMetricsConfig `yaml:"self_metrics_config"`
 }
 
 type Downsampler struct {
@@ -335,6 +341,29 @@ func (d *Downsampler) downsample() error {
 	return nil
 }
 
+func exportMetrics(filename string, registry *prometheus.Registry) error {
+	metricsFamilies, err := registry.Gather()
+	if err != nil {
+		return err
+	}
+
+	tempFilename := filename + ".tmp"
+	file, err := os.Create(tempFilename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := expfmt.NewEncoder(file, expfmt.FmtText)
+	for _, mf := range metricsFamilies {
+		if err := encoder.Encode(mf); err != nil {
+			return err
+		}
+	}
+
+	return os.Rename(tempFilename, filename)
+}
+
 func LoadConfig(configFile string) (*Config, error) {
 	var cfg Config
 	if len(configFile) == 0 {
@@ -408,19 +437,33 @@ func main() {
 	}
 	defer db.Close()
 
-	go func() {
-		prometheus.MustRegister(lastSuccess)
-		prometheus.MustRegister(processed)
-		prometheus.MustRegister(retryTotal)
-		prometheus.MustRegister(failureTotal)
-		http.Handle("/metrics", promhttp.Handler())
-		level.Info(logger).Log("msg", "Listening on "+listenAddr)
-		err = http.ListenAndServe(listenAddr, nil)
-		if err != nil {
-			level.Error(logger).Log("err", err)
-			panic(err)
-		}
-	}()
+	var wg sync.WaitGroup
+	stopper := make(chan struct{})
+	if cfg.SelfMetricsConfig.TextfileCollectorOutput != "" {
+		go func() {
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(lastSuccess)
+			registry.MustRegister(processed)
+			registry.MustRegister(retryTotal)
+			registry.MustRegister(failureTotal)
+
+			ticker := time.NewTicker(time.Second * 5)
+			defer ticker.Stop()
+
+			wg.Add(1)
+		L:
+			for {
+				select {
+				case <-ticker.C:
+					exportMetrics(cfg.SelfMetricsConfig.TextfileCollectorOutput, registry)
+				case <-stopper:
+					exportMetrics(cfg.SelfMetricsConfig.TextfileCollectorOutput, registry)
+					break L
+				}
+			}
+			wg.Done()
+		}()
+	}
 
 	d := Downsampler{
 		promAddr:    promAddr,
@@ -438,5 +481,7 @@ func main() {
 		level.Error(logger).Log("err", err)
 		panic(err)
 	}
+	close(stopper)
+	wg.Wait()
 	level.Info(logger).Log("msg", "downsample done")
 }

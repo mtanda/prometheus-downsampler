@@ -10,3 +10,5 @@ relabel_config:
     target_label: downsample_type
     regex: (.*)
     replacement: ${1}
+self_metrics_config:
+  textfile_collector_output: /tmp/prometheus_downsampler.prom
