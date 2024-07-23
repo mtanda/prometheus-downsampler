@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -276,11 +277,20 @@ func (d *Downsampler) downsample() error {
 					}
 				}
 				value, warn, err = promAPI.Query(ctx, query, downsampleBaseTimestamp)
+				isSuccess := false
 				if warn == nil && err == nil {
+					isSuccess = true
+				}
+				for _, w := range warn {
+					if strings.Contains(w, "metric might not be a counter, name does not end in") {
+						isSuccess = true
+					}
+				}
+				if isSuccess {
 					break
 				}
 				retryWait := time.Duration(math.Pow(2, float64(retryCount)))
-				level.Info(*d.logger).Log("query", query, "retry", retryCount, "wait", retryWait)
+				level.Info(*d.logger).Log("query", query, "retry", retryCount, "wait", retryWait, "error", err, "warn", warn)
 				time.Sleep(retryWait * time.Second)
 				retryTotal.WithLabelValues().Inc()
 			}
