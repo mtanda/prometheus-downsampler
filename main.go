@@ -280,7 +280,7 @@ func (d *Downsampler) downsample() error {
 					break
 				}
 				retryWait := time.Duration(math.Pow(2, float64(retryCount)))
-				level.Info(*d.logger).Log("query", query, "retry", retryCount, "wait", retryWait)
+				level.Info(*d.logger).Log("query", query, "retry", retryCount, "wait", retryWait, "error", err, "warn", warn)
 				time.Sleep(retryWait * time.Second)
 				retryTotal.WithLabelValues().Inc()
 			}
