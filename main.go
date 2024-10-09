@@ -141,6 +141,7 @@ type SelfMetricsConfig struct {
 type Config struct {
 	DownsampleConfig  DownsampleConfig  `yaml:"downsample_config"`
 	RelabelConfig     []*relabel.Config `yaml:"relabel_config"`
+	ExcludeLabel      string            `yaml:"exclude_label"`
 	SelfMetricsConfig SelfMetricsConfig `yaml:"self_metrics_config"`
 }
 
@@ -308,6 +309,10 @@ func (d *Downsampler) downsample() error {
 				lb.Set(l.MetricName, metricName)
 				lb.Set(downsampleLabel, downsampleType)
 				ls := relabel.Process(lb.Labels(), relabelConfig...)
+
+				if ls.Get(d.config.ExcludeLabel) != "" {
+					continue
+				}
 
 				if len(allMetadata) == 0 || allMetadata[metricName][0].Type != v1.MetricTypeCounter || downsampleType == "max" {
 					d.mss = append(d.mss, &tsdb.MetricSample{Labels: ls, Value: float64(m.Value), TimestampMs: (m.Timestamp.Unix() - downsampleInterval + 1) * 1000})
