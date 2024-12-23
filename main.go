@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"gopkg.in/yaml.v2"
 
 	"github.com/prometheus/client_golang/api"
@@ -42,8 +42,7 @@ const (
 )
 
 var (
-	downsampleDuration = strconv.FormatInt(int64(downsampleInterval), 10) + "s"
-	lastSuccess        = prometheus.NewGaugeVec(
+	lastSuccess = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "downsampler_last_success_timestamp_seconds",
 			Help: "The last success timestamp",
@@ -235,6 +234,20 @@ func (d *Downsampler) downsample() error {
 		return err
 	}
 	promAPI := v1.NewAPI(client)
+
+	var version v1.BuildinfoResult
+	version, err = promAPI.Buildinfo(ctx)
+	if err != nil {
+		return err
+	}
+	var downsampleDuration string
+	if strings.HasPrefix(version.Version, "2.") {
+		downsampleDuration = strconv.FormatInt(int64(downsampleInterval-1), 10) + "s"
+	} else if strings.HasPrefix(version.Version, "3.") {
+		downsampleDuration = strconv.FormatInt(int64(downsampleInterval), 10) + "s"
+	} else {
+		return fmt.Errorf("Prometheus version is not supported")
+	}
 
 	progressTotal := len(lr.Data) * len(downsampleTypes)
 	sleepDuration := time.Duration(fetchDurationMilliseconds/progressTotal) * time.Millisecond
