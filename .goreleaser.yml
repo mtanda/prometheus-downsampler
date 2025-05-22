@@ -1,16 +1,22 @@
+version: 2
+
 builds:
-- main: ./
-  flags: -a -tags netgo
-  ldflags: |
-    -s -w
-  env:
-    - CGO_ENABLED=0
-  goos:
-    - linux
-  goarch:
-    - amd64
+  - id: prometheus-downsampler
+    main: ./
+    flags:
+      - -a
+      - -tags=netgo
+    ldflags:
+      - -s -w
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+
 nfpms:
-  -
+  - id: packages
     package_name: prometheus-downsampler
     homepage: https://github.com/mtanda/prometheus-downsampler
     maintainer: Mitsuhiro Tanda
@@ -39,11 +45,12 @@ nfpms:
       postinstall: "packaging/scripts/postinstall.sh"
       postremove: "packaging/scripts/postremove.sh"
       preremove: "packaging/scripts/preremove.sh"
+
 changelog:
   sort: asc
   filters:
     exclude:
-    - '^docs:'
-    - '^test:'
-    - '^cut:'
-    - '^typo'
+      - '^docs:'
+      - '^test:'
+      - '^cut:'
+      - '^typo'
